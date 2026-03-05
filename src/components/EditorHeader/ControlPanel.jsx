@@ -82,10 +82,25 @@ import { toDBML } from "../../utils/exportAs/dbml";
 import { exportSavedData } from "../../utils/exportSavedData";
 import { nanoid } from "nanoid";
 import { getTableHeight } from "../../utils/utils";
+import { arrangeTables } from "../../utils/arrangeTables";
+import { generateSampleData } from "../../utils/generateSampleData";
+import { saveAs } from "file-saver";
 import { deleteFromCache, STORAGE_KEY } from "../../utils/cache";
 import { useLiveQuery } from "dexie-react-hooks";
 import { DateTime } from "luxon";
 
+/**
+ * Render the editor's control panel containing the header, toolbar, menus, and related modals/sidesheets.
+ *
+ * Provides UI controls for file/export/import, edit actions (undo/redo/duplicate/cut/copy/paste), view and layout toggles,
+ * zoom/fit/reset, save/versioning, auto-arrange and sample-data generation, and access to settings/help.
+ *
+ * @param {Object} props - Component props.
+ * @param {string} props.title - Current diagram title displayed in the header.
+ * @param {(title: string) => void} props.setTitle - Callback to update the diagram title.
+ * @param {string} props.lastSaved - Human-readable "last saved" timestamp text shown in the header.
+ * @returns {JSX.Element} The control panel UI for the diagram editor.
+ */
 export default function ControlPanel({ title, setTitle, lastSaved }) {
   const { id: diagramId } = useParams();
 
@@ -565,6 +580,46 @@ export default function ControlPanel({ title, setTitle, lastSaved }) {
       zoom: scale,
       pan: { x: centerX, y: centerY },
     }));
+  };
+  const autoArrange = () => {
+    if (layout.readOnly) return;
+    // deep clone tables so arrangeTables can mutate safely
+    const cloned = JSON.parse(JSON.stringify(tables));
+    arrangeTables({ tables: cloned, relationships });
+
+    const elements = cloned.map((t) => {
+      const orig = tables.find((o) => o.id === t.id) || { x: 0, y: 0 };
+      return {
+        id: t.id,
+        type: ObjectType.TABLE,
+        undo: { x: orig.x, y: orig.y },
+        redo: { x: t.x, y: t.y },
+      };
+    });
+
+    setTables(cloned);
+    setUndoStack((prev) => [
+      ...prev,
+      {
+        action: Action.MOVE,
+        bulk: true,
+        message: t("bulk_update"),
+        elements,
+      },
+    ]);
+    setRedoStack([]);
+    setSaveState(State.SAVING);
+  };
+  const generateSample = (count = 5) => {
+    if (layout.readOnly) return;
+    try {
+      const data = generateSampleData(tables, count);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      saveAs(blob, `sample_data_${count}.json`);
+      Toast.success(t("sample_data_generated"));
+    } catch (e) {
+      Toast.error(t("oops_smth_went_wrong"));
+    }
   };
   const edit = () => {
     if (selectedElement.element === ObjectType.TABLE) {
@@ -1731,6 +1786,24 @@ export default function ControlPanel({ title, setTitle, lastSaved }) {
               disabled={layout.readOnly}
             >
               <IconAddNote />
+            </button>
+          </Tooltip>
+          <Tooltip content={t("auto_arrange")} position="bottom">
+            <button
+              className="py-1 px-2 hover-2 rounded-sm flex items-center disabled:opacity-50"
+              onClick={autoArrange}
+              disabled={layout.readOnly}
+            >
+              <i className="fa-solid fa-sitemap" />
+            </button>
+          </Tooltip>
+          <Tooltip content={t("generate_sample_data")} position="bottom">
+            <button
+              className="py-1 px-2 hover-2 rounded-sm flex items-center disabled:opacity-50"
+              onClick={() => generateSample(5)}
+              disabled={layout.readOnly}
+            >
+              <i className="fa-solid fa-database" />
             </button>
           </Tooltip>
           <Divider layout="vertical" margin="8px" />
